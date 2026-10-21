@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.6 — 2026-10-22
+
+修复「一段流式卡片 + 一段纯文本」的截断式降级。
+
+- **根因是 relay 的 10 秒收尾超时**：`relay.close()` 用
+  `asyncio.wait_for(stream_task, timeout=10)` 等 `send_streaming` 收工。原来刷字是在
+  chunk 循环里同步 `await` 的，而一次整卡 PUT / 刷字要 0.7–1s，长任务时我们根本来不及收尾
+  → 超时被 cancel → 卡片停在 `💭 处理中`，剩余正文由 relay 用 `channel.send` 补成纯文本。
+- 刷字改为**后台 coalescing worker**：chunk 循环只标记 dirty、立即返回；后台每
+  `interval` 取最新全文刷一次，天然合并高频 delta。收尾前 `drain_pushes(3s)` 再封卡。
+- 实测 120 段长文本：**最后一段到函数返回 0.9s**（阈值 10s），卡片完整 ✅ 已完成，
+  `card_stream_fallback` / `streaming_card_failed` 计数 0。
+
+
 ## 0.1.5 — 2026-10-22
 
 修复「长任务退化成纯文本、丢卡片」。

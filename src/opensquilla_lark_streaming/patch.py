@@ -198,24 +198,47 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                     chars=len(state.get("text") or ""),
                 )
 
-        async def push_content(content: str) -> None:
-            card = state.get("card_id")
-            if not card:
+        # 刷字只在后台做，绝不在 chunk 循环里 await。
+        # relay 收尾只等 10s（asyncio.wait_for(stream_task, 10)）；同步刷字一慢就被
+        # 取消，卡片停在半截、剩余正文被 relay 用 channel.send 补成纯文本。
+        push_bg: dict[str, Any] = {"task": None, "dirty": False}
+
+        async def push_once() -> None:
+            if not state.get("card_id"):
                 return
-            async with state["lock"]:
-                seq = int(state["seq"])
-                state["seq"] = seq + 1
+            await _refresh_card(self, state, done=False)
+
+        async def push_loop() -> None:
+            while True:
+                await asyncio.sleep(interval_s)
+                if not push_bg["dirty"]:
+                    return
+                push_bg["dirty"] = False
+                try:
+                    await push_once()
+                except Exception as exc:  # noqa: BLE001 - 刷字失败不影响主流程
+                    if log is not None:
+                        log.warning(
+                            "feishu.card_stream_fallback",
+                            error_type=type(exc).__name__,
+                            error=str(exc)[:200],
+                        )
+
+        def push_content(content: str) -> None:
+            push_bg["dirty"] = True
+            task = push_bg["task"]
+            if task is None or task.done():
+                push_bg["task"] = asyncio.create_task(push_loop())
+
+        async def drain_pushes(timeout: float = 3.0) -> None:
+            task = push_bg["task"]
+            if task is None or task.done():
+                return
+            push_bg["dirty"] = False
             try:
-                await _cardkit_update_element(self, card, "content", content, seq)
-            except Exception as exc:  # noqa: BLE001 - 流式通道不可用时退回整卡 PUT
-                if log is not None:
-                    log.warning(
-                        "feishu.card_stream_fallback",
-                        error_type=type(exc).__name__,
-                        error=str(exc)[:200],
-                        chars=len(content),
-                    )
-                await _refresh_card(self, state, done=False)
+                await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+            except Exception:  # noqa: BLE001 - 收尾仍要往下走
+                task.cancel()
 
         try:
             async for chunk in chunks:
@@ -234,7 +257,7 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                     last_push = now
                     continue
                 if now - last_push >= interval_s:
-                    await push_content(accumulated)
+                    push_content(accumulated)
                     last_push = now
 
             if not accumulated.strip() and not state["tools"] and not state["rounds"]:
@@ -244,7 +267,7 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                 state["card_id"] = card_id
                 register_card(card_id, message_id)
                 asyncio.create_task(_load_footer(self, state))
-            await push_content(accumulated)
+            await drain_pushes()
             await _cardkit_finish(self, card_id, accumulated, state, failed=False)
             return message_id
         except Exception as exc:  # noqa: BLE001 - 流式失败要退回普通消息
