@@ -9,7 +9,7 @@ description = "Feishu (Lark) streaming cards for OpenSquilla — CardKit 2.0, to
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-authors = [{ name = "Duseus", url = "https://github.com/Duseus" }]
+authors = [{ name = "Duseus" }]
 keywords = ["opensquilla", "feishu", "lark", "cardkit", "streaming", "agent"]
 classifiers = [
   "Programming Language :: Python :: 3",
