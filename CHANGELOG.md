@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.3 — 2026-10-21
+
+修复 OpenSquilla 0.5.6 上升级后「只发纯文本、不出卡片」。
+
+- 0.5.x 的 `FeishuChannel.STREAM_UPDATE_STRATEGY = "final_only"` 会让 relay 完全跳过
+  流式通道（`relay_stream=False`，只调用 `channel.send`）。`apply()` 现在运行期覆盖为
+  `adapter_stream`；0.3.x 时代这一行是直接改源码的常量，改 shim 后必须显式设置。
+- 实测：`resolve_channel_stream_policy(FeishuChannel)` 由 `final_only` 变为
+  `adapter_stream`，`relay_stream=True`。
+
 ## 0.1.2 — 2026-10-21
 
 兼容 OpenSquilla 0.5.6（0.3.x 仍可用）。

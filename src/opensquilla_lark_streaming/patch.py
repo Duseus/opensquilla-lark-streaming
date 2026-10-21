@@ -124,6 +124,12 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
     receive_id_type_of = ns["_feishu_receive_id_type"]
     log = ns.get("log")
 
+    # 0.5.x 的 FeishuChannel 声明 STREAM_UPDATE_STRATEGY="final_only"，
+    # 会让 relay 直接跳过流式通道（只调用 channel.send 发纯文本）。
+    # 旧的源码补丁是直接改这个常量，现在必须运行期覆盖。
+    channel_cls.STREAM_UPDATE_STRATEGY = "adapter_stream"
+    channel_cls.stream_update_strategy = "adapter_stream"
+
     async def send_streaming(
         self: Any,
         chunks: Any,
