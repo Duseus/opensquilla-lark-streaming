@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opensquilla-lark-streaming"
+version = "0.1.0"
+description = "Feishu (Lark) streaming cards for OpenSquilla — CardKit 2.0, tool panel, token metrics"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Duseus", url = "https://github.com/Duseus" }]
+keywords = ["opensquilla", "feishu", "lark", "cardkit", "streaming", "agent"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+osls = "opensquilla_lark_streaming.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Duseus/opensquilla-lark-streaming"
+Issues = "https://github.com/Duseus/opensquilla-lark-streaming/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
