@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2 — 2026-10-21
+
+兼容 OpenSquilla 0.5.6（0.3.x 仍可用）。
+
+- 0.5.x 的 `_RuntimeChannelStreamRelay` 不再有 `_forward_tool_event`，改为覆写
+  `relay.emit(event)` 把思考/工具/Done 事件转发给通道
+- 强制 `relay._live_preview = True`：0.5.x 默认把正文攒到 Done 才交付，否则卡片没有打字效果
+- `send_streaming` 接受并忽略新版多传的路由参数（`**kwargs`）
+- 在 0.5.6 上实测：`live_preview=True`，`ThinkingEvent / ToolUseStartEvent / DoneEvent` 全部到达通道
+
 ## 0.1.1 — 2026-10-21
 
 面板详细度上调（用户反馈「展示的东西要详细一点点」）。

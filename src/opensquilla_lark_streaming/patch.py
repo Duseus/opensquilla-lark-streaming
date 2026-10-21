@@ -43,14 +43,56 @@ def _module_ns(channel_cls: type) -> dict[str, Any]:
 
 
 def _patch_dispatch() -> bool:
-    """让 channel relay 把 done 事件也转发给通道（token 统计要用）。"""
+    """把 Thinking/Tool/Done 事件转发给通道，并让 relay 实时吐字。
+
+    两代 OpenSquilla 的结构不同：
+
+    * 0.3.x：``_RuntimeChannelStreamRelay._forward_tool_event(event)`` 逐事件转发；
+    * 0.5.x：只有 ``relay.emit(event)``，通道侧拿不到事件，且正文默认攒到
+      Done 才交付（没有打字效果）。
+    """
     try:
         dispatch = importlib.import_module("opensquilla.gateway.channel_dispatch")
-        relay_cls = dispatch._RuntimeChannelStreamRelay  # noqa: SLF001
+        relay_cls = getattr(dispatch, "_RuntimeChannelStreamRelay", None)
     except Exception:  # noqa: BLE001 - 不同版本结构可能不同，降级即可
         return False
+    if relay_cls is None:
+        return False
 
-    original = relay_cls._forward_tool_event  # noqa: SLF001
+    # ---- OpenSquilla 0.5+ ----
+    if callable(getattr(relay_cls, "emit", None)) and not hasattr(relay_cls, "_forward_tool_event"):
+        if getattr(relay_cls, "_osls_emit_patched", False):
+            return True
+
+        original_emit = relay_cls.emit
+
+        async def emit(self: Any, event: Any) -> None:
+            await original_emit(self, event)
+            hook = getattr(getattr(self, "_channel", None), "note_stream_event", None)
+            if not callable(hook):
+                return
+            try:
+                await hook(event)
+            except Exception:  # noqa: BLE001 - 渲染失败不能影响回复
+                pass
+
+        original_init = relay_cls.__init__
+
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            # 强制实时预览：否则 relay 只在 Done 时一次性交付，卡片没有打字效果
+            self._live_preview = True
+
+        emit._osls_emit_patched = True  # type: ignore[attr-defined]
+        relay_cls.emit = emit  # noqa: SLF001
+        relay_cls.__init__ = __init__  # noqa: SLF001
+        relay_cls._osls_emit_patched = True  # noqa: SLF001
+        return True
+
+    # ---- OpenSquilla 0.3.x ----
+    original = getattr(relay_cls, "_forward_tool_event", None)
+    if original is None:
+        return False
     if getattr(original, "_osls_patched", False):
         return True
 
@@ -88,7 +130,9 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
         *,
         chat_id: str | None = None,
         update_interval_ms: int = 350,
+        **kwargs: Any,
     ) -> str | None:
+        del kwargs  # 新版本可能传额外路由参数，卡片只用 chat_id
         target = chat_id or self.config.default_chat_id
         accumulated = ""
         card_id: str | None = None
