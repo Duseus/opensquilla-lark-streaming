@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.5 — 2026-10-22
+
+修复「长任务退化成纯文本、丢卡片」。
+
+- **实时预览开关没打开**：0.5.x 的 `_channel_can_replace_streamed_text()` 要求
+  `capability_profile.streamed_message_replacement=True`，原生 Feishu 只声明了 `edit=True`
+  → `live_preview=False` → relay 把所有 delta 攒到 Done 才一次性交付，长任务动辄几千字，
+  最终只落一条大消息（或干脆没建卡，直接走 `channel.send` 发纯文本）。
+- `apply()` 现在覆写 `capability_profile`，在原生 profile 上补
+  `streamed_message_replacement=True`（我们的 `send_streaming` 确实返回稳定消息 id，
+  `edit` 也已支持卡片，声明属实）。
+- 增加排障日志：`feishu.card_created` / `feishu.card_edit_reconcile` /
+  `feishu.card_stream_fallback` / `feishu.streaming_card_failed`。
+- 实测：`live_preview: True`、`policy: adapter_stream`，长文本流式 + 收尾 edit 正常。
+
+
 ## 0.1.4 — 2026-10-21
 
 修复「任务一长卡片就没了 / 卡片外加一大段纯文本」。

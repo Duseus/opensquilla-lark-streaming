@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib
 import json
 import time
@@ -118,6 +119,23 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
     if getattr(channel_cls, MARKER, False):
         return True
 
+    # 0.5.x 用 capability_profile.streamed_message_replacement 判断能否实时预览：
+    # 原生 Feishu 只声明了 edit=True，于是 relay 把所有 delta 攒到 Done 才一次性交付
+    # （长任务看起来就像「降级成文本」）。我们的 send_streaming 会返回稳定的消息 id，
+    # 并且 edit 已支持卡片，因此可以诚实地声明支持替换。
+    base_profile = getattr(channel_cls, "capability_profile", None)
+    if isinstance(base_profile, property) and base_profile.fget is not None:
+        base_fget = base_profile.fget
+
+        def capability_profile(self: Any) -> Any:
+            profile = base_fget(self)
+            try:
+                return dataclasses.replace(profile, streamed_message_replacement=True)
+            except Exception:  # noqa: BLE001 - 老版本 profile 不可替换时保持原样
+                return profile
+
+        channel_cls.capability_profile = property(capability_profile)
+
     ns = _module_ns(channel_cls)
     retry_request = ns["retry_request"]
     OutgoingMessage = ns["OutgoingMessage"]
@@ -173,6 +191,12 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
             cards[str(cid)] = state
             if mid:
                 cards[str(mid)] = state
+            if log is not None:
+                log.info(
+                    "feishu.card_created",
+                    card_id=str(cid),
+                    chars=len(state.get("text") or ""),
+                )
 
         async def push_content(content: str) -> None:
             card = state.get("card_id")
@@ -183,7 +207,14 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                 state["seq"] = seq + 1
             try:
                 await _cardkit_update_element(self, card, "content", content, seq)
-            except Exception:  # noqa: BLE001 - 流式通道不可用时退回整卡 PUT
+            except Exception as exc:  # noqa: BLE001 - 流式通道不可用时退回整卡 PUT
+                if log is not None:
+                    log.warning(
+                        "feishu.card_stream_fallback",
+                        error_type=type(exc).__name__,
+                        error=str(exc)[:200],
+                        chars=len(content),
+                    )
                 await _refresh_card(self, state, done=False)
 
         try:
@@ -246,6 +277,8 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                 await original_edit(self, message_id, content, **kwargs)
             return
         state["text"] = content or ""
+        if log is not None:
+            log.info("feishu.card_edit_reconcile", chars=len(content or ""))
         await _refresh_card(self, state, done=True)
 
     channel_cls.edit = edit
