@@ -62,15 +62,16 @@ def _round_row(item: dict[str, Any], now: float) -> dict[str, Any]:
 
 
 def _preview_row(text: str) -> dict[str, Any] | None:
-    preview = " ".join((text or "").split())
+    preview = "\n".join(line.strip() for line in (text or "").splitlines() if line.strip())
     if not preview:
         return None
+    limit = 1200
     return {
         "tag": "div",
         "margin": "0px 0px 0px 22px",
         "text": {
             "tag": "lark_md",
-            "content": preview[:200] + ("…" if len(preview) > 200 else ""),
+            "content": preview[:limit] + ("…" if len(preview) > limit else ""),
             "text_size": "notation",
         },
     }

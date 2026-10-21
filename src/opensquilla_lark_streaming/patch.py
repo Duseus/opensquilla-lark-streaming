@@ -214,7 +214,7 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                 current = _new_round(state)
                 changed = True
             text = getattr(event, "text", "") or ""
-            if text and len(current["text"]) < 400:
+            if text and len(current["text"]) < 4000:
                 current["text"] += text
             state["last_kind"] = "thinking"
 

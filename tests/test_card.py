@@ -46,6 +46,16 @@ class PanelTests(unittest.TestCase):
         self.assertIn("Run command (201 ms)", contents[2])
         self.assertEqual(contents[3], "git status --short")
 
+    def test_long_thinking_preview_kept(self):
+        long_text = "第一段结论。" * 40 + "\n第二段继续分析。" * 40
+        rows = round_elements(
+            [{"n": 1, "started": 0.0, "ended": 1.0, "text": long_text, "tools": []}], now=1.0
+        )
+        preview = rows[1]["text"]["content"]
+        self.assertGreater(len(preview), 500)
+        self.assertIn("\n", preview)
+        self.assertLessEqual(len(preview), 1201)
+
     def test_running_tool_is_turquoise(self):
         rounds = [
             {
