@@ -317,7 +317,7 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
             return
         state["weather"] = weather or ""
         state["hitokoto"] = hitokoto or ""
-        if not state.get("card_id"):
+        if not state.get("card_id") or state.get("finished"):
             return
         try:
             await _refresh_card(self, state, done=False)
@@ -436,6 +436,9 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
             card_id = state.get("card_id")
             if not card_id:
                 return
+            # 封卡之后（天气/一言这类迟到的后台刷新）不许把状态改回「处理中」
+            if state.get("finished") and not done:
+                return
             seq = int(state["seq"])
             state["seq"] = seq + 1
             now = time.monotonic()
@@ -462,6 +465,8 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                 f"/cardkit/v1/cards/{card_id}",
                 {"card": {"type": "card_json", "data": json.dumps(card, ensure_ascii=False)}, "sequence": seq},
             )
+            if done:
+                state["finished"] = True
 
     async def _cardkit_request(
         self: Any, method: str, path: str, payload: dict[str, Any]
@@ -536,6 +541,8 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
         state["card_id"] = card_id
         state["text"] = text
         await _refresh_card(self, state, done=True, failed=failed)
+        if log is not None:
+            log.info("feishu.card_finished", card_id=str(card_id), chars=len(text), failed=failed)
 
     for name, func in (
         ("send_streaming", send_streaming),
