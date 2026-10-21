@@ -21,6 +21,7 @@ import asyncio
 import importlib
 import json
 import time
+import uuid
 from typing import Any
 
 from .card import build_card
@@ -163,14 +164,27 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
         }
         self._stream_state = state
 
+        def register_card(cid: str, mid: str | None) -> None:
+            """记住 卡片 id / 消息 id → 流状态，供 relay 收尾的 edit 复用。"""
+            cards = getattr(self, "_osls_cards", None)
+            if cards is None:
+                cards = {}
+                setattr(self, "_osls_cards", cards)
+            cards[str(cid)] = state
+            if mid:
+                cards[str(mid)] = state
+
         async def push_content(content: str) -> None:
+            card = state.get("card_id")
+            if not card:
+                return
             async with state["lock"]:
-                current = state.get("card_id")
-                if not current:
-                    return
                 seq = int(state["seq"])
                 state["seq"] = seq + 1
-                await _cardkit_update_element(self, current, "content", content, seq)
+            try:
+                await _cardkit_update_element(self, card, "content", content, seq)
+            except Exception:  # noqa: BLE001 - 流式通道不可用时退回整卡 PUT
+                await _refresh_card(self, state, done=False)
 
         try:
             async for chunk in chunks:
@@ -184,6 +198,7 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                         continue
                     card_id, message_id = await _cardkit_create_and_send(self, target, accumulated, state)
                     state["card_id"] = card_id
+                    register_card(card_id, message_id)
                     asyncio.create_task(_load_footer(self, state))
                     last_push = now
                     continue
@@ -196,6 +211,7 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
             if card_id is None:
                 card_id, message_id = await _cardkit_create_and_send(self, target, accumulated, state)
                 state["card_id"] = card_id
+                register_card(card_id, message_id)
                 asyncio.create_task(_load_footer(self, state))
             await push_content(accumulated)
             await _cardkit_finish(self, card_id, accumulated, state, failed=False)
@@ -215,6 +231,24 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                 return message_id
             await self.send(OutgoingMessage(content=accumulated, reply_to=target))
             return None
+
+    original_edit = getattr(channel_cls, "edit", None)
+
+    async def edit(self: Any, message_id: str, content: str, **kwargs: Any) -> None:
+        """relay 收尾会用 ``edit`` 覆盖流式消息，卡片消息改走整卡更新。
+
+        否则 FeishuChannel.edit 会拿卡片 id 去改文本消息，必然 400，
+        relay 判定替换失败后就把整段答案重发成纯文本（卡片 + 一大段文字）。
+        """
+        state = (getattr(self, "_osls_cards", None) or {}).get(str(message_id))
+        if state is None:
+            if original_edit is not None:
+                await original_edit(self, message_id, content, **kwargs)
+            return
+        state["text"] = content or ""
+        await _refresh_card(self, state, done=True)
+
+    channel_cls.edit = edit
 
     async def _load_footer(self: Any, state: dict[str, Any]) -> None:
         """后台取天气/一言，取到后刷新一次卡片。"""
@@ -423,14 +457,21 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
     async def _cardkit_update_element(
         self: Any, card_id: str, element_id: str, content: str, sequence: int
     ) -> None:
+        """流式刷字。
+
+        0.5.x / CardKit 的正解是 ``/elements/{id}/content/content``（两个 content），
+        且卡片必须 ``config.streaming_mode = true``；用带 ``uuid`` 的幂等键，
+        12k 字实测一次 PUT 通过。旧路径 ``/elements/{id}/content`` 会 400
+        「element is required」。
+        """
         body = content if content and content.strip() else " "
         if len(body) > 18_000:
             body = body[:18_000] + "\n\n...（内容过长，已截断）"
         await _cardkit_request(
             self,
             "put",
-            f"/cardkit/v1/cards/{card_id}/elements/{element_id}/content",
-            {"content": body, "sequence": sequence},
+            f"/cardkit/v1/cards/{card_id}/elements/{element_id}/content/content",
+            {"content": body, "sequence": sequence, "uuid": str(uuid.uuid4())},
         )
 
     async def _cardkit_finish(

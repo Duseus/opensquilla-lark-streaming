@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.4 — 2026-10-21
+
+修复「任务一长卡片就没了 / 卡片外加一大段纯文本」。
+
+- **刷字接口路径错了**：CardKit 流式刷字是
+  `PUT /cardkit/v1/cards/{id}/elements/{eid}/content/content`（两个 `content`），
+  且要带 `uuid` 幂等键；旧代码打到 `/elements/{eid}/content`，稳定 400
+  `element is required`。失败会一路冒泡出去，卡片停在半截。
+- **收尾 `edit` 打到了错误对象**：relay 用 `channel.edit(message_id, text)` 覆盖流式消息，
+  但我们的 message_id 是卡片消息，`FeishuChannel.edit` 按文本消息处理必然 400；
+  relay 判定替换失败后会把**整段答案重发成纯文本**。现在 `edit` 命中卡片时改走整卡更新。
+- 刷字失败自动退回整卡 PUT（实测 75KB 无压力），不会再把卡片打断。
+- 实测：40 段长文本流式 → 卡片持续更新、`edit` 收尾成功、最终 ✅ 已完成。
+
 ## 0.1.3 — 2026-10-21
 
 修复 OpenSquilla 0.5.6 上升级后「只发纯文本、不出卡片」。
