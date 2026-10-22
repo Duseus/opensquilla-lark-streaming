@@ -241,6 +241,22 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
                 task.cancel()
 
         try:
+            # 收到消息立即创建初始卡片，给用户实时的视觉反馈（无需等待思考结束或首字输出）
+            if target:
+                try:
+                    card_id, message_id = await _cardkit_create_and_send(self, target, "", state)
+                    state["card_id"] = card_id
+                    register_card(card_id, message_id)
+                    asyncio.create_task(_load_footer(self, state))
+                    last_push = time.monotonic()
+                except Exception as init_exc:
+                    if log is not None:
+                        log.warning(
+                            "feishu.card_init_fallback",
+                            error_type=type(init_exc).__name__,
+                            error=str(init_exc)[:200],
+                        )
+
             async for chunk in chunks:
                 if not chunk:
                     continue

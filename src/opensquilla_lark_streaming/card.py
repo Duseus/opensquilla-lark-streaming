@@ -236,7 +236,7 @@ def build_card(
         template = "blue"
         title = f"💭 {agent_name} 处理中..."
 
-    body = text if text.strip() else " "
+    body = text if text.strip() else ("💭 正在思考中..." if not done else " ")
     if len(body) > MAX_BODY_CHARS:
         body = body[:MAX_BODY_CHARS] + "\n\n...（内容过长，已截断）"
 
