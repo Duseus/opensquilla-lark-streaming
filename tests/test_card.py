@@ -36,13 +36,13 @@ class PanelTests(unittest.TestCase):
     def test_panel_title(self):
         self.assertEqual(
             panel_title(53, 9, 609),
-            "🧠 9 轮 · 🛠️ 53 个工具 · ⏳ 10 分 9 秒",
+            "🌊 9 轮 · 🫧 53 个工具 · ✨ 10 分 9 秒",
         )
 
     def test_round_rows_include_title_preview_and_detail(self):
         rows = round_elements(sample_rounds(1, 1), now=1.0)
         contents = [row.get("text", {}).get("content", "") for row in rows]
-        self.assertIn("<font color='green'>**第 1 轮 · 1.0s**</font>", contents[0])
+        self.assertIn("🌊 <font color=green>**第 1 轮 · 1.0s**</font>", contents[0])
         self.assertIn("Run command (201 ms)", contents[2])
         self.assertEqual(contents[3], "git status --short")
 
@@ -137,7 +137,7 @@ class CardTests(unittest.TestCase):
         card = build_card(text="x" * 30_000, done=True)
         content = card["body"]["elements"][0]["content"]
         self.assertLess(len(content), 18_200)
-        self.assertIn("已截断", content)
+        self.assertTrue("防卡片溢出" in content or "已截断" in content)
 
 
 if __name__ == "__main__":

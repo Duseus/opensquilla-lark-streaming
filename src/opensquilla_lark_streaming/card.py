@@ -1,13 +1,12 @@
 """卡片 JSON 构建（CardKit 2.0）。
 
-结构对齐 Hermes 的飞书卡片：
-
+对齐 Hermes / aiduPOP 的水晶与泡波卡片美学：
     ┌───────────────────────────────┐
     │  💭 Tanuki 处理中…      (blue) │  header
-    │  回答正文（流式刷新的 markdown）│  element_id=content
-    │  ▶ 🧠 9 轮 · 🛠️ 53 个工具 · ⏳ 10 分 9 秒
-    │      第 1 轮 · 0.0s           │  collapsible_panel
-    │      Run command (201 ms)     │  element_id=agent_process_panel
+    │  回答正文（15ms 流式打字机）  │  element_id=content
+    │  ▶ 🌊 9 轮 · 🫧 53 个工具 · ✨ 10分9秒
+    │      🌊 第 1 轮 · 0.2s        │  collapsible_panel (处理中自动展开)
+    │      👩🏻‍💻 Run command (201 ms)  │  element_id=agent_process_panel
     │      git diff ...             │
     │  ─────────────────────────    │  hr
     │  ✅ 已完成 · 4m 11s · ⚕model  │  footer markdown
@@ -22,19 +21,20 @@ import time
 from typing import Any
 
 from .descriptors import describe_tool, resolve_descriptor, tool_detail
+from .md import clamp_utf8
 from .metrics import compact_num, footer_elapsed, human_duration, resolve_context_window
+from .theme import get_theme, is_emoji_icon
 
 MAX_BODY_CHARS = 18_000
-# 飞书单卡元素上限约 200，留出余量后再裁剪历史步骤
 MAX_PANEL_ELEMENTS = 150
 KEEP_PANEL_ELEMENTS = 140
 
 
 def panel_title(tool_count: int, round_count: int, elapsed_s: float) -> str:
-    """面板折叠态标题：``🧠 9 轮 · 🛠️ 53 个工具 · ⏳ 10 分 9 秒``。"""
+    """面板折叠态标题：🌊 9 轮 · 🫧 53 个工具 · ✨ 10 分 9 秒"""
     return (
-        f"🧠 {int(round_count)} 轮 · 🛠️ {int(tool_count)} 个工具"
-        f" · ⏳ {human_duration(elapsed_s)}"
+        f"🌊 {int(round_count)} 轮 · 🫧 {int(tool_count)} 个工具"
+        f" · ✨ {human_duration(elapsed_s)}"
     )
 
 
@@ -45,17 +45,15 @@ def _round_row(item: dict[str, Any], now: float) -> dict[str, Any]:
     ended = now if ended is None else float(ended)
     duration = max(ended - started, 0.0)
     color = "green" if item.get("ended") else "orange"
+    theme = get_theme()
+    round_icon = theme.get("round_icon", "🌊")
+    round_num = item.get("n", 1)
+    content = f"{round_icon} <font color={color}>**第 {round_num} 轮 · {duration:.1f}s**</font>"
     return {
         "tag": "div",
-        "icon": {
-            "tag": "standard_icon",
-            "token": "robot-add_outlined",
-            "size": "16px 16px",
-            "color": "grey",
-        },
         "text": {
             "tag": "lark_md",
-            "content": f"<font color='{color}'>**第 {item.get('n')} 轮 · {duration:.1f}s**</font>",
+            "content": content,
             "text_size": "notation",
         },
     }
@@ -89,12 +87,35 @@ def _tool_row(tool: dict[str, Any]) -> dict[str, Any]:
     if tool.get("elapsed") is not None:
         elapsed_ms = float(tool["elapsed"]) * 1000
     title, icon = describe_tool(tool.get("name"), elapsed_ms)
+    
+    theme = get_theme()
+    tool_icons = theme.get("tool_icons", {})
+    tool_name = (tool.get("name") or "").lower()
+    
+    emoji_icon = None
+    for k, v in tool_icons.items():
+        if k in tool_name:
+            emoji_icon = v
+            break
+    if not emoji_icon:
+        emoji_icon = tool_icons.get("fallback", "👩🏻‍🔧")
+
+    if is_emoji_icon(emoji_icon):
+        content = f"{emoji_icon} <font color={color}>**{title}**</font>"
+        return {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": content,
+                "text_size": "notation",
+            },
+        }
     return {
         "tag": "div",
         "icon": {"tag": "standard_icon", "token": icon, "color": "grey"},
         "text": {
             "tag": "lark_md",
-            "content": f"<font color='{color}'>**{title}**</font>",
+            "content": f"<font color={color}>**{title}**</font>",
             "text_size": "notation",
         },
     }
@@ -117,11 +138,6 @@ def _detail_row(tool: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def round_elements(rounds: list[dict[str, Any]], now: float | None = None) -> list[dict[str, Any]]:
-    """把轮次/工具状态渲染成面板子元素。
-
-    超过 ``MAX_PANEL_ELEMENTS`` 时保留最近 ``KEEP_PANEL_ELEMENTS`` 项并前置提示，
-    正常长度下全量渲染，点开折叠面板就能看到每一步。
-    """
     now = time.monotonic() if now is None else now
     rows: list[dict[str, Any]] = []
     for item in rounds:
@@ -142,7 +158,7 @@ def round_elements(rounds: list[dict[str, Any]], now: float | None = None) -> li
                 "tag": "div",
                 "text": {
                     "tag": "plain_text",
-                    "content": f"⚡ 还有 {hidden} 项已折叠（超出卡片上限）",
+                    "content": f"💦 还有 {hidden} 项已折叠（超出卡片上限）",
                     "text_color": "grey",
                     "text_size": "notation",
                 },
@@ -161,12 +177,6 @@ def footer_text(
     elapsed_s: float = 0.0,
     usage: dict[str, Any] | None = None,
 ) -> str:
-    """底栏三行：状态指标 / 天气 / 一言。
-
-    指标行示例::
-
-        ✅ 已完成 · 4m 11s · ⚕gemini-3.8-flash-high · 输入 10.0M 输出 18.0K 思考 4.4K · 159.9K/1.0M (15%)
-    """
     if failed:
         status = "⚠️ 已中止"
     elif done:
@@ -178,7 +188,7 @@ def footer_text(
     if elapsed_s:
         parts.append(footer_elapsed(elapsed_s))
     if model:
-        parts.append(f"⚕{model.split('/')[-1]}")
+        parts.append(f"⚕{model.split("/")[-1]}")
 
     usage = usage or {}
     input_tokens = int(usage.get("input") or 0)
@@ -192,7 +202,6 @@ def footer_text(
 
     window = resolve_context_window(model)
     if window and input_tokens:
-        # DoneEvent 只给本轮累计输入，按迭代次数折算近似上下文占用
         iterations = max(int(usage.get("iterations") or 1), 1)
         used_context = min(input_tokens // iterations, window)
         parts.append(
@@ -222,7 +231,6 @@ def build_card(
     usage: dict[str, Any] | None = None,
     agent_name: str = "Tanuki",
 ) -> dict[str, Any]:
-    """构建整张卡片 JSON。"""
     rounds = rounds or []
     tools = tools or []
 
@@ -236,9 +244,9 @@ def build_card(
         template = "blue"
         title = f"💭 {agent_name} 处理中..."
 
+    # 1. 采用 clamp_utf8 保护卡片不超限
     body = text if text.strip() else ("💭 正在思考中..." if not done else " ")
-    if len(body) > MAX_BODY_CHARS:
-        body = body[:MAX_BODY_CHARS] + "\n\n...（内容过长，已截断）"
+    body = clamp_utf8(body, max_bytes=MAX_BODY_CHARS, preserve_tail=done)
 
     elements: list[dict[str, Any]] = [
         {
@@ -250,6 +258,7 @@ def build_card(
         }
     ]
 
+    # 2. 思考与工具折叠面板：进行中默认展开，收尾自动折叠
     if rounds or tools:
         elements.append(
             {
@@ -280,6 +289,7 @@ def build_card(
             }
         )
 
+    # 3. 分割线与状态底栏
     elements.append({"tag": "hr"})
     elements.append(
         {
@@ -303,6 +313,11 @@ def build_card(
         "schema": "2.0",
         "config": {
             "streaming_mode": not done,
+            "streaming_config": {
+                "print_frequency_ms": {"default": 15},
+                "print_step": {"default": 1},
+                "print_strategy": "fast",
+            },
             "update_multi": True,
             "summary": {"content": summary},
         },
