@@ -255,7 +255,7 @@ def build_card(
             {
                 "tag": "collapsible_panel",
                 "element_id": "agent_process_panel",
-                "expanded": False,
+                "expanded": (not done) and (not failed),
                 "header": {
                     "title": {
                         "tag": "plain_text",

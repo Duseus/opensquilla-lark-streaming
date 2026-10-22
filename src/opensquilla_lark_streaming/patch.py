@@ -30,7 +30,7 @@ from .metrics import fetch_hitokoto, fetch_weather
 
 MARKER = "_opensquilla_lark_streaming_applied"
 
-TOOL_EVENT_KINDS = ("tool_use_start", "tool_result", "thinking", "router_decision", "done")
+TOOL_EVENT_KINDS = ("tool_use_start", "tool_use_end", "tool_result", "thinking", "router_decision", "done")
 
 
 def _module_ns(channel_cls: type) -> dict[str, Any]:
@@ -386,6 +386,29 @@ def apply(channel_cls: type, *, agent_name: str = "Tanuki") -> bool:
             }
             state["tools"].append(tool)
             current["tools"].append(tool)
+            state["last_kind"] = "tool"
+            changed = True
+
+        elif kind == "tool_use_end":
+            tool_id = getattr(event, "tool_use_id", "")
+            name = getattr(event, "tool_name", "") or "tool"
+            args = getattr(event, "arguments", None)
+            tool = next((item for item in state["tools"] if tool_id and item.get("id") == tool_id), None)
+            if tool is None:
+                current = state.get("cur_round") or _new_round(state)
+                tool = {
+                    "id": tool_id,
+                    "name": name,
+                    "ok": None,
+                    "started": time.monotonic(),
+                    "elapsed": None,
+                    "detail": "",
+                }
+                state["tools"].append(tool)
+                current["tools"].append(tool)
+            tool["name"] = tool.get("name") or name
+            from .descriptors import tool_detail
+            tool["detail"] = tool_detail(name, args)
             state["last_kind"] = "tool"
             changed = True
 
